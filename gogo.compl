@@ -1,48 +1,48 @@
-# gogo completion file
-# source it to use it.
+# gogo 命令自动补全脚本
+# 使用方法：在shell配置文件中通过source命令加载此文件
 
 _gogoAliases()
 {
     cur=$1
     CONF_FILE="${HOME}/.config/gogo/gogo.conf"
 
-    # read aliases from $CONF_FILE
+    # 从配置文件中读取别名
     if [[ -f ${CONF_FILE} ]]; then
         IFS=' ='
         CONFALIASES=
 
         while read -r confalias directory
         do
-            # Recognise comments
+            # 识别并跳过注释行
             if [[ ${confalias} =~ '^#' ]]; then
                 continue
             fi
 
-            # When <tab> is pressed when full alias is typed in, completion will add "/" to it. This
-            # way path completion will be enabled.
+            # 当用户输入完整别名并按Tab键时，自动补全会添加"/"
+            # 这样就能启用路径补全功能
             if [[ ${cur} != "" && (${cur} == ${confalias}) ]]; then
                 COMPREPLY=( $(compgen -W "${confalias}/" -- ${cur}) )
                 return
             fi
 
-            # Path completion
-            # Basically changes alias to real directory name, fetches all directories inside it and
-            # changes real directory name back to alias.
+            # 路径补全功能
+            # 基本原理：将别名转换为实际目录名，获取其中的所有子目录
+            # 然后再将实际目录名转换回别名形式
             if [[ ${cur} == ${confalias}/* ]]; then
                 unset IFS
                 if [[ ${directory} != *://* ]]; then
-                    # Use this instead of $directory which may contain a tilde interpreted as string
-                    # literal (eval enforces '~' expansion)
+                    # 使用eval处理目录路径，确保波浪号(~)被正确展开
+                    # 直接使用$directory可能会将波浪号解释为普通字符
                     eval realdirectory=${directory}
 
-                    # Replace the first occurence of alias in cur with a real directory
+                    # 将当前输入中的别名替换为实际目录路径
                     currealdir=${cur/${confalias}/${realdirectory}}
 
-                    # List directories matching an expression
+                    # 列出匹配表达式的所有目录
                     compdirs="$(echo ${currealdir}*/)"
 
-                    # compdirs contain this silly string (like /home/user/*/) when there's no
-                    # directory inside
+                    # 当目录中没有子目录时，compdirs会包含特殊字符串
+                    # (类似于 /home/user/*/)
                     if [[ ${compdirs} != "${currealdir}*/" ]]; then
                         aliasdirs=${compdirs//${realdirectory}/${confalias}}
                         COMPREPLY=( $(compgen -W "${aliasdirs}" -- ${cur}) )
@@ -51,7 +51,7 @@ _gogoAliases()
                 return
             fi
 
-            # don't display the default target
+            # 不显示默认目标（default别名）
             if [[ ${confalias} == "default" ]]; then
                 continue
             fi
