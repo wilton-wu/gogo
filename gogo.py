@@ -1,265 +1,269 @@
 #!/usr/bin/env python
 
-"""
-Copyright (C) 2013-2014 Michal Goral
-
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-"""
-
 import sys
-import os
-import errno
-import getpass
-import gettext
-import locale
-import operator
+from pathlib import Path
+from os import environ
 
-__version__ = "1.3.0"
+__version__ = "2.0.0"
 
-t = gettext.translation(
-    domain='gogo',
-    fallback=True)
-gettext.install('gogo')
-_ = t.ugettext
+HELP_MSG = """gogo - 快速目录导航工具
 
-HELP_MSG = _(
-"""gogo - bookmark your favorite directories
+用法:
+  gogo [选项] | [目录别名] | [目录别名/子目录/路径]
 
-usage:
-  gogo [OPTIONS]|[DIR_ALIAS]
+选项:
+  -a, --add 别名   : 将当前目录以指定别名添加到配置中
+  -l, --ls         : 列出所有已配置的别名及其对应路径
+  -e, --edit       : 在$EDITOR中打开配置文件进行编辑
+  -h, --help       : 显示此帮助信息
+  -v, --version    : 显示版本信息并退出
 
-options:
-  -a alias      : add current directory as alias to the configuration
-  -l, --ls      : list aliases
-  -e, --edit    : open configuration file in $EDITOR
-  -h, --help    : show this message
-  -v, --version : print version number and exit
+示例:
+  gogo              # 导航到默认目录(如未设置则为$HOME)
+  gogo work         # 导航到别名为"work"的目录
+  gogo work/src/lib # 导航到"work"别名目录下的子路径
+  gogo -a proj      # 将当前目录添加为别名"proj"
+  gogo -l           # 查看所有已配置的别名
 
-examples:
-  gogo alias
-  gogo alias/child/directory
+SSH支持:
+  gogo server       # 如果"server"配置为SSH别名，将连接到远程服务器
 
-See ~/.config/gogo/gogo.conf for configuration details."""
-)
+配置文件位于 ~/.config/gogo/gogo.conf
+配置格式: 别名 = 路径 或 别名 = ssh://服务器信息:shell /路径"""
+
+# 使用Path对象处理路径，更加安全和跨平台
+HOME_DIR = Path.home()
+CONFIG_DIR = HOME_DIR / ".config" / "gogo"
+CONFIG_NAME = "gogo.conf"
+CONFIG_PATH = CONFIG_DIR / CONFIG_NAME
 
 DEFAULT_CONFIG = [
-    _("# This is an example 'gogo' config file") + '\n',
-    _("# Each line starting with '#' character is considered a comment.") + '\n',
-    _("# Each entry should be in the following format:") + '\n',
-    _("# dir_alias = /dir/path/") + '\n',
-    _("# Example:") + '\n',
+    "# 这是一个'gogo'配置文件示例\n",
+    "# 每行以'#'字符开头的被视为注释。\n",
+    "# 每个条目应该采用以下格式：\n",
+    "# 目录别名 = /目录/路径/\n",
+    "# 示例：\n",
     "\n",
-    "default = %s\n" % os.path.expanduser("~"),
+    f"default = {HOME_DIR}\n",
     "\n",
-    _("# 'default' is a special alias which is used when no alias is given to gogo.") + '\n',
-    _("# If you don't specify it in a configuration file, it'll point to your home dir.") + '\n',
+    "# 'default'是一个特殊别名，当没有给gogo提供别名时使用。\n",
+    "# 如果您没有在配置文件中指定它，它将指向您的主目录。\n",
     "\n",
-    _("# You can also connect to directory on ssh server but syntax is slightly different:") + '\n',
-    _("# dir_alias = ssh://server_name:chosen_shell /dir/path/") + '\n\n',
-    _("# You can omit shell if you wish but in this case gogo will use ${SHELL} variable.") + '\n',
-    _("# dir_alias = ssh://second_server /dir/path/") + '\n',
+    "# 您也可以连接到ssh服务器上的目录，但语法略有不同：\n",
+    "# 目录别名 = ssh://服务器名称:选择的shell /目录/路径/\n\n",
+    "# 如果您愿意，可以省略shell，但在这种情况下gogo将使用${SHELL}变量。\n",
+    "# 目录别名 = ssh://第二个服务器 /目录/路径/\n",
     "\n",
-    "sshloc = ssh://%s@127.0.0.1:%s %s\n" %
-        (getpass.getuser(), os.environ["SHELL"], os.path.expanduser("~")),
-    "- = -\n"
-    "gogo = ~/.config/gogo\n",
+    f"sshloc = ssh://{Path.home().name}@127.0.0.1:/bin/bash {HOME_DIR}\n",
+    "- = -\ngogo = ~/.config/gogo\n",
 ]
 
-configName = "gogo.conf"
-configDir = "%s/%s" % (os.path.expanduser("~"), "/.config/gogo")
-configPath = os.path.join(configDir, configName)
 
 def echo(text, output=sys.stdout, endline=True):
+    """输出文本到指定输出流"""
     if output == sys.stdout:
-        if endline is True:
-            output.write("echo '%s';" %  text)
-        else:
-            output.write("echo -n '%s';" %  text)
+        output.write(f"echo{' -n' if not endline else ''} '{text}';")
     else:
-        output.write("%s" % text)
-        if endline is True:
-            output.write("\n")
+        output.write(f"{text}{chr(10) if endline else ''}")
+
 
 def call(cmd):
-    sys.stdout.write("%s;\n" % cmd)
+    """执行命令并退出"""
+    sys.stdout.write(f"{cmd};\n")
     sys.exit(0)
+
 
 def printVersion():
-    echo("gogo %s" % __version__)
+    """打印版本信息并退出"""
+    echo(f"gogo {__version__}")
     sys.exit(0)
 
+
 def fatalError(msg, status=1):
+    """打印错误信息并以指定状态码退出"""
     echo(msg, sys.stderr)
     sys.exit(status)
 
+
 def _changeDirectory(directory):
+    """切换到指定目录"""
     if directory.startswith("~/"):
-        directory = directory.replace("~", os.path.expanduser("~"))
-    call("cd '%s'" % directory)
+        directory = str(HOME_DIR / directory[2:])
+    call(f"cd '{directory}'")
+
 
 def _sshToAddress(address):
-    addressPart, directory = address.split(" ", 1)
-    splitted = addressPart.split(":")
-    server = splitted[0]
-    shell = splitted[1] if len(splitted) > 1 else "${SHELL}"
+    """SSH连接到远程地址"""
+    try:
+        addressPart, directory = address.split(" ", 1)
+        splitted = addressPart.split(":")
+        server = splitted[0]
+        shell = splitted[1] if len(splitted) > 1 else "${SHELL}"
 
-    call("ssh %s -t 'cd %s; %s'" % (server, directory, shell))
+        call(f"ssh {server} -t 'cd {directory}; {shell}'")
+    except ValueError:
+        fatalError("SSH地址格式错误，正确格式为: ssh://server[:shell] /path")
+
 
 def processRequest(request):
+    """处理用户请求"""
     if request.startswith("ssh://"):
         address = request.replace("ssh://", "", 1)
         _sshToAddress(address)
     else:
         _changeDirectory(request)
 
+
 def printConfig(config):
-    echo(_("Current gogo configuration (sorted alphabetically):"))
-    if len(config) > 0:
+    """打印配置信息"""
+    echo("当前gogo配置（按字母顺序排序）：")
+    if config:
         justification = len(max(config.keys(), key=len)) + 2
 
-        # sort
-        configList = [(key, config[key]) for key in config.keys()]
-        configList.sort(key = operator.itemgetter(0))
+        # 排序
+        configList = sorted(config.items(), key=lambda x: x[0])
 
         for key, val in configList:
-            keyStr = "%s" % key.decode(locale.getpreferredencoding())
-            valStr = " : %s" % val
+            keyStr = str(key)  # 直接转换为字符串，Python 3中默认是Unicode
+            valStr = f" : {val}"
             echo(keyStr.rjust(justification), endline=False)
             echo(valStr)
     else:
-        echo(_("  [ NO CONFIGURATION ] "), sys.stderr)
+        echo("  [ 没有配置 ] ", sys.stderr)
+
 
 def createNonExistingConfigDir():
-    try:
-        os.makedirs(configDir)
-    except OSError as exc:
-        if exc.errno == errno.EEXIST and os.path.isdir(configDir):
-            pass
-        else: raise
+    """创建配置目录（如果不存在）"""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def openConfigInEditor():
+    """在编辑器中打开配置文件"""
     try:
-        editor = os.environ["EDITOR"]
+        editor = environ["EDITOR"]
     except KeyError:
-        echo(_("No $EDITOR set. Trying vi."), sys.stderr)
+        echo("未设置$EDITOR。尝试使用vi。", sys.stderr)
         editor = "vi"
-    call("%s %s" % (editor, configPath))
+    call(f"{editor} {CONFIG_PATH}")
     sys.exit(1)
 
+
 def readConfig():
+    """读取配置文件内容"""
     createNonExistingConfigDir()
-    lines = None
     try:
-        with open(configPath, 'r') as file_:
+        with CONFIG_PATH.open("r") as file_:
             lines = file_.readlines()
     except IOError:
         lines = DEFAULT_CONFIG
-        with open(configPath, 'w+') as file_:
+        with CONFIG_PATH.open("w+") as file_:
             file_.writelines(lines)
     return lines
 
-def preparePath(path):
-    path = path.strip('"\' ')
-    return path
 
-def prepareAlias(alias):
-    alias = alias.strip()
-    return alias
+def prepareString(text, strip_chars="\"' "):
+    """准备字符串，去除两端的指定字符"""
+    return text.strip(strip_chars)
+
 
 def parseConfig(lines):
+    """解析配置文件内容"""
     configDict = {}
     for lineNo, line in enumerate(lines):
         line = line.strip()
-        if not line.startswith('#') and line != "":
-            split = line.strip().split('=', 1)
-            try:
-                key = prepareAlias(split[0])
-                val = preparePath(split[1])
-            except IndexError:
-                fatalError(_("Error at parsing a config file..\n  at line %s:\n  %s" % (lineNo, line) ))
-            configDict[key] = val
+        if not line or line.startswith("#"):
+            continue
+            
+        try:
+            key, value = line.split("=", 1)
+            configDict[prepareString(key)] = prepareString(value)
+        except ValueError:
+            fatalError(f"错误地解析配置文件..\n  在第{lineNo + 1}行:\n  {line}")
+    
     return configDict
 
-def addAlias(alias, currentConfig):
-    if currentConfig.get(alias) is None:
-        currentDir = os.getcwd()
 
-        with open(configPath, "a") as file_:
-            file_.write("%s = %s\n" % (alias, currentDir))
+def addAlias(alias, currentConfig):
+    """添加新别名到配置文件"""
+    if alias not in currentConfig:
+        currentDir = Path.cwd()
+
+        with CONFIG_PATH.open("a") as file_:
+            file_.write(f"{alias} = {currentDir}\n")
     else:
-        fatalError(_("Alias '%s' already exists!") % alias)
+        fatalError(f"别名'{alias}'已经存在！")
+
 
 def parseAlias(alias, config):
-    """Parse alias inputted by a user. Returns a tuple: ('dir', 'remainder_path').
-    It's because of a feature that user can input something like "alias/child/directory" and gogo
-    should change directory into "dir/child/directory"."""
+    """解析用户输入的别名。返回一个元组：('dir', 'remainder_path')。
+    这是因为用户可以输入类似"alias/child/directory"的内容，而gogo
+    应该将目录更改为"dir/child/directory"。"""
 
-    # If user chooses an alias with a slash in it, so be it.
-    newdir = config.get(alias)
-    if newdir is not None:
-        return (newdir, "")
+    # 先检查完整别名是否存在
+    if alias in config:
+        return (config[alias], "")
 
+    # 尝试拆分路径
     splitted = alias.split("/", 1)
-    newdir = config.get(splitted[0])
-    if newdir is None:
-        fatalError(_("'%s' not found in a configuration file!" % alias))
+    base_alias = splitted[0]
+    
+    if base_alias not in config:
+        fatalError(f"在配置文件中找不到'{alias}'！")
+        
+    remainder = splitted[1] if len(splitted) > 1 else ""
+    return (config[base_alias], remainder)
 
-    if len(splitted) == 1:
-        return (newdir, "")
-    else:
-        return (newdir, splitted[1])
 
 def main():
+    """主函数"""
     lines = readConfig()
-
-    argNo = len(sys.argv[1:])
-    if 0 == argNo:
+    args = sys.argv[1:]
+    
+    # 无参数情况：导航到默认目录
+    if not args:
         config = parseConfig(lines)
-        processRequest(config.get("default", os.path.expanduser("~")))
-    elif 1 == argNo:
-        arg = sys.argv[1]
-        if arg == "-h" or arg == "--help":
-            echo(HELP_MSG)
-        elif arg == "-v" or arg == "--version":
-            printVersion()
-        elif arg == "-l" or arg == "--ls":
-            config = parseConfig(lines)
-            printConfig(config)
-        elif arg == "-e" or arg == "--edit":
-            openConfigInEditor()
-        elif arg == "-a":
-            fatalError(_("Alias to add not specified!"))
+        processRequest(config.get("default", str(HOME_DIR)))
+        return
+        
+    # 单参数情况
+    if len(args) == 1:
+        arg = args[0]
+        
+        # 处理选项
+        options = {
+            ("-h", "--help"): lambda: echo(HELP_MSG),
+            ("-v", "--version"): printVersion,
+            ("-l", "--ls"): lambda: printConfig(parseConfig(lines)),
+            ("-e", "--edit"): openConfigInEditor,
+            ("-a", "--add"): lambda: fatalError("未指定要添加的别名！")
+        }
+        
+        for option_keys, action in options.items():
+            if arg in option_keys:
+                action()
+                return
+        
+        # 处理别名导航
+        config = parseConfig(lines)
+        newdir, remainder = parseAlias(arg, config)
+        if remainder:  # 修复例如'gogo -'，它将导致'-/'
+            processRequest(str(Path(newdir) / remainder))
         else:
-            config = parseConfig(lines)
-            newdir, remainder = parseAlias(arg, config)
-            if len(remainder) > 0: # fix for e.g. 'gogo -' which would result in '-/'
-                processRequest(os.path.join(newdir, remainder))
-            else:
-                processRequest(newdir)
-    elif 2 == argNo:
-        arg = sys.argv[1]
-        if arg == "-a":
-            alias = sys.argv[2]
-            config = parseConfig(lines)
-            addAlias(alias, config)
-        else:
-            fatalError(HELP_MSG, 2)
-    else:
-        fatalError(HELP_MSG, 3)
+            processRequest(newdir)
+        return
+            
+    # 双参数情况
+    if len(args) == 2 and args[0] in ("-a", "--add"):
+        config = parseConfig(lines)
+        addAlias(args[1], config)
+        return
+        
+    # 其他情况：显示帮助
+    fatalError(HELP_MSG, 2 if len(args) == 2 else 3)
 
-try:
-    main()
-except KeyboardInterrupt:
-    sys.exit(2)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(2)
